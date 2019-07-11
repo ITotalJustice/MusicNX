@@ -14,6 +14,8 @@
 #include <switch.h>
 #include <math.h>
 
+#define sdl_default_bitrate 48000
+
 
 bool g_IsScroll = false, id3v2Found = false, id3v2Enable = true, shuffleMode = false, secNeedsZero = false, displayMin = false, inTab = false;
 int i = 0, j = 0, g_CursorList = 0, g_MaxList = 12, songListMax = 11, g_MusListY = 150, g_MusListX = 650, g_MusListMaxY = 635, g_MusListMaxX = 1000, scrollNowplay = 60, \
@@ -49,7 +51,7 @@ int initApp()
     SDL_Init(SDL_INIT_EVERYTHING);
     IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
     Mix_Init(MIX_INIT_MOD | MIX_INIT_MP3 | MIX_INIT_OGG);
-    Mix_OpenAudio(48000, AUDIO_S32LSB, 2, 1024);
+    Mix_OpenAudio(sdl_default_bitrate, AUDIO_S32LSB, 2, 1024);
     Mix_VolumeMusic(64); //TODO: volume slider
     mpg123_init();
     return 0;
@@ -420,8 +422,8 @@ int main(int argc, char **argv)
 
     if (loadTexture() != 0) printf("ERROR: Texture load failed!\n");
 
-    SDL_Colour allColour[] = {white, grey, black, pink, hotPink, orange, yellow, gold, brown, red, darkRed, green, limeGreen, aqua, teal, lightBlue, blue, darkBlue, purple, indigo, beige};
-    SDL_Texture *allThemes[] = {black_background, white_background, ams_background, vapor};
+    SDL_Colour allColour[] = { white, grey, black, pink, hotPink, orange, yellow, gold, brown, red, darkRed, green, limeGreen, aqua, teal, lightBlue, blue, darkBlue, purple, indigo, beige };
+    SDL_Texture *allThemes[] =  { black_background, white_background, ams_background, vapor };
     background = allThemes[0];
     colour = allColour[0], highlight = allColour[1];
     char *allColourString[22] = {"white", "grey", "black", "pink", "hotPink", "orange", "yellow", "gold", "brown", "red", "darkRed", "green", "limeGreen", "aqua", "teal", "lightBlue", "blue", "darkBlue", "purple", "indigo", "beige", '\0'};
