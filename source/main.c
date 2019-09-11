@@ -364,35 +364,9 @@ int main(int argc, char **argv)
 
     if (randomizerInit() != 0) printf("ERROR: randomizer failed!\n");
 
-    char *location = "sdmc:/music/";
-
-    /* FILE* conf = fopen("sdmc:/music.ini", "a+");
-    if (conf == NULL) location = "sdmc:/music/";
-    else
-    {
-        long length = 0;
-		fseek (conf, 0L, SEEK_END);
-		length = ftell (conf);
-		fseek (conf, 0, SEEK_SET);
-		location = calloc(1, length+1);
-		if (location) fread (location, 1, length, conf);
-        printf("the location in file is %s\n", location);
-    }
-    fclose(conf);
-
-    if (chdir(location) != 0) 
-    {
-        printf("ERROR 1: FAILED TO OPEN DIRECTORY FROM FILE...\n");
-        if (chdir("sdcm:/music/") != 0)
-        {
-            printf("ERROR 2: FAILED TO OPEN DEFAULT DIRECTORY 'sdmc:/music'...");
-            goto errorExit;
-        }
-    }*/
-    chdir(location);
-
+    chdir("sdmc:/music/");
 	struct dirent *de;
-	DIR *dr = opendir(location);
+	DIR *dr = opendir("sdmc:/music/");
 
     while ((de = readdir(dr)) != NULL && i < 2500)
     {
