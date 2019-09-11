@@ -50,7 +50,7 @@ int initApp()
     TTF_Init();
     SDL_Init(SDL_INIT_EVERYTHING);
     IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
-    Mix_Init(MIX_INIT_MOD | MIX_INIT_MP3 | MIX_INIT_OGG);
+    Mix_Init(MIX_INIT_MOD | MIX_INIT_MP3 | MIX_INIT_OGG | MIX_INIT_FLAC);
     Mix_OpenAudio(sdl_default_bitrate, AUDIO_S32LSB, 2, 1024);
     Mix_VolumeMusic(64); //TODO: volume slider
     mpg123_init();
@@ -364,9 +364,9 @@ int main(int argc, char **argv)
 
     if (randomizerInit() != 0) printf("ERROR: randomizer failed!\n");
 
-    char *location = {'\0'};
+    char *location = "sdmc:/music/";
 
-    FILE* conf = fopen("sdmc:/music.ini", "a+");
+    /* FILE* conf = fopen("sdmc:/music.ini", "a+");
     if (conf == NULL) location = "sdmc:/music/";
     else
     {
@@ -388,7 +388,8 @@ int main(int argc, char **argv)
             printf("ERROR 2: FAILED TO OPEN DEFAULT DIRECTORY 'sdmc:/music'...");
             goto errorExit;
         }
-    }
+    }*/
+    chdir(location);
 
 	struct dirent *de;
 	DIR *dr = opendir(location);
@@ -406,7 +407,7 @@ int main(int argc, char **argv)
     }
     i--;
     closedir(dr);
-    free(location);
+    //free(location);
 
     if (initApp() != 0) printf("\nERROR: initApp failed!\n");
 
