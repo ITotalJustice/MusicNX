@@ -5,16 +5,14 @@
 #include <time.h>
 #include <ctype.h>
 
-#include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_mixer.h>
-#include <SDL2/SDL_ttf.h>
 
 #include <mpg123.h>
 #include <switch.h>
 #include <math.h>
 
-#define sdl_default_bitrate 48000
+#include "sdl.h"
 
 
 bool g_IsScroll = false, id3v2Found = false, id3v2Enable = true, shuffleMode = false, secNeedsZero = false, displayMin = false, inTab = false;
@@ -22,39 +20,57 @@ int i = 0, j = 0, g_CursorList = 0, g_MaxList = 12, songListMax = 11, g_MusListY
     g_CursorScroll = 650, g_SongInSec = -1, g_SongInMin = 0, g_ListMoveTemp = 0, g_ListMove = 0, errorCode = 0, menuTab = 0;
 static double songSecTotal, songProgressBar = 0, songProgressBarIncrease = 0;
 static int min, sec;
-void *keyheap;
 
 double rewindValue = -1;
 char *g_MusList[2500] = {'\0'}; //Around 10gb of 4MB .mp3 files. Size can be increased if needed, just set at this for now...
 static Mix_Music *music = NULL;
 
 static mpg123_handle *handle = NULL;
-static SDL_Window *window = NULL;
-static SDL_Renderer *renderer = NULL;
-static TTF_Font *fntTiny = NULL, *fntSmall = NULL, *fntMediumIsh = NULL, *fntMedium = NULL, *fntLarge = NULL;
-SDL_Colour \
-            white = {255, 255, 255}, grey = {140, 140, 140, 255}, pink = {255, 192, 203}, hotPink = {255, 105, 180}, orange = {255, 165, 0}, yellow = {255, 255, 0}, \
-            gold = {255, 215, 0}, brown = {139, 69, 19}, red = {255, 0, 0}, darkRed = {139, 0, 0}, green = {0, 128, 0}, limeGreen = {50, 205, 50}, \
-            aqua = {0, 255, 255}, teal = {0, 128, 128}, lightBlue = {0, 191, 255}, blue = {0, 0, 255}, darkBlue = {0, 0, 139}, purple = {160, 32, 240}, \
-            indigo = {75, 0, 130}, beige = {245, 245, 220}, black = {0, 0, 0}, neonPink = { 253, 52, 131, 1 }, brightGrey = { 140, 140, 140, 1 }, colour, highlight;
-SDL_Texture \
-            *background = NULL, *black_background = NULL, *white_background = NULL, *ams_background = NULL, *kyon = NULL, *switch_logo = NULL, *right_arrow = NULL, \
-            *a_button = NULL, *b_button = NULL, *y_button = NULL, *plus_button = NULL, *scrollbar = NULL, *ID3_tag = NULL, *white_play_button = NULL, \
-            *grey_play_button = NULL, *pause_grey = NULL, *play_grey = NULL, *play_white = NULL, *pause_white = NULL, *loop1_icon = NULL, *loop_grey = NULL, \
-            *loop_white = NULL, *shuffle_grey = NULL, *shuffle_white = NULL, *skip_back = NULL, *skip_forward = NULL, *rewind_icon = NULL, \
-            *musicNX = NULL, *vapor = NULL, *empty_box_grey, *tick_box;
 
 int initApp()
 {
-    romfsInit();
-    TTF_Init();
-    SDL_Init(SDL_INIT_EVERYTHING);
-    IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
-    Mix_Init(MIX_INIT_MOD | MIX_INIT_MP3 | MIX_INIT_OGG | MIX_INIT_FLAC);
-    Mix_OpenAudio(sdl_default_bitrate, AUDIO_S32LSB, 2, 1024);
-    Mix_VolumeMusic(64); //TODO: volume slider
+    Result rc;
+
+    if (R_FAILED(rc = socketInitializeDefault()))           // for curl / nxlink.
+        printf("socketInitializeDefault() failed: 0x%x.\n\n", rc);
+
+    #ifdef DEBUG
+    if (R_FAILED(rc = nxlinkStdio()))                       // redirect all printout to console window.
+        printf("nxlinkStdio() failed: 0x%x.\n\n", rc)
+    #endif
+
+    if (R_FAILED(rc = setsysInitialize()))                  // for system version
+        printf("setsysInitialize() failed: 0x%x.\n\n", rc);
+
+    if (R_FAILED(rc = splInitialize()))                     // for atmosphere version
+        printf("splInitialize() failed: 0x%x.\n\n", rc);
+
+    if (R_FAILED(rc = plInitialize()))                      // for shared fonts.
+        printf("plInitialize() failed: 0x%x.\n\n", rc);
+
+    if (R_FAILED(rc = romfsInit()))                         // load textures from app.
+        printf("romfsInit() failed: 0x%x.\n\n", rc);
+
+    sdlInit();                                              // int all of sdl and start loading textures.
+
     mpg123_init();
     return 0;
+}
+
+void appExit()
+{
+    Mix_HaltChannel(-1);
+    Mix_FreeMusic(music);
+    Mix_CloseAudio();
+    Mix_Quit();
+    mpg123_exit();
+
+    romfsExit();
+    sdlExit();
+    socketExit();
+    plExit();
+    splExit();
+    setsysExit();
 }
 
 int randomizerInit()
@@ -70,7 +86,7 @@ int randomizer(int low, int high)
     return rand() % (high - low + 1) + low;
 }
 
-void textDraw(TTF_Font *font, int x, int y, SDL_Color colour, const char *text)
+/*void drawText(TTF_Font *font, int x, int y, SDL_Color colour, const char *text)
 {
     SDL_Surface *Surface = TTF_RenderText_Blended_Wrapped(font, text, colour, 1920);
     SDL_Texture *Tex = SDL_CreateTextureFromSurface(renderer, Surface);
@@ -82,116 +98,7 @@ void textDraw(TTF_Font *font, int x, int y, SDL_Color colour, const char *text)
     SDL_DestroyTexture(Tex);
     SDL_FreeSurface(Surface);
     g_IsScroll = false;
-}
-
-void imageLoad(SDL_Texture **texture, char *path)
-{
-	SDL_Surface *Surface = IMG_Load(path);
-    SDL_ConvertSurfaceFormat(Surface, SDL_PIXELFORMAT_RGBA8888, 0);
-    *texture = SDL_CreateTextureFromSurface(renderer, Surface);
-	SDL_FreeSurface(Surface);
-}
-
-void imageLoadMem(SDL_Texture **texture, void *data, int size)
-{
-	SDL_Surface *surface = NULL;
-	surface = IMG_Load_RW(SDL_RWFromMem(data, size), 1);
-    /*IMG_SavePNG(surface, g_MusList[j]);
-    IMG_SavePNG(surface, "sdmc:/%s.img", g_MaxList[j]);
-    IMG_SaveJPG(surface, g_MusList[j], 300)*/
-
-	if (surface) *texture = SDL_CreateTextureFromSurface(renderer, surface);
-	SDL_FreeSurface(surface);
-}
-
-void imageDraw(SDL_Texture *texture, int x, int y)
-{
-    SDL_Rect pos = { pos.x = x, pos.y = y};
-	SDL_QueryTexture(texture, NULL, NULL, &pos.w, &pos.h);
-	SDL_RenderCopy(renderer, texture, NULL, &pos);
-}
-
-void imageDrawScale(SDL_Texture *texture, int x, int y, int w, int h)
-{
-    SDL_Rect pos = { pos.x = x, pos.y = y, pos.w = w, pos.h = h};
-	SDL_RenderCopy(renderer, texture, NULL, &pos);
-}
-
-void shapeDraw(SDL_Colour colour, int x, int y, int w, int h)
-{
-    SDL_Rect pos = { pos.x = x, pos.y = y, pos.w = w, pos.h = h };
-    SDL_SetRenderDrawColor(renderer, colour.r, colour.g, colour.b, colour.a);
-    SDL_RenderFillRect( renderer, &pos);
-}
-
-int loadTexture()
-{
-    imageLoad(&black_background, "romfs:/data/black_blackground.png");
-    imageLoad(&white_background, "romfs:/data/white_background.png");
-    imageLoad(&ams_background, "romfs:/data/ams_background.png");
-    imageLoad(&kyon, "romfs:/data/kyon.jpg");
-    imageLoad(&switch_logo, "romfs:/data/switch_logo.png");
-    imageLoad(&right_arrow, "romfs:/data/right_arrow.png");
-    imageLoad(&a_button, "romfs:/data/a_button.jpg");
-    imageLoad(&b_button, "romfs:/data/b_button.jpg");
-    imageLoad(&plus_button, "romfs:/data/plus_button.jpg");
-    imageLoad(&scrollbar, "romfs:/data/scrollbar.jpg");
-    imageLoad(&white_play_button, "romfs:/data/white_play_button.png");
-    imageLoad(&grey_play_button, "romfs:/data/grey_play_button.png");
-    imageLoad(&pause_grey, "romfs:/data/pause_grey.png");
-    imageLoad(&play_grey, "romfs:/data/play_grey.png");
-    imageLoad(&play_white, "romfs:/data/play_white.png");
-    imageLoad(&pause_white, "romfs:/data/pause_white.png");
-    imageLoad(&loop1_icon, "romfs:/data/loop1_icon.png");
-    imageLoad(&loop_grey, "romfs:/data/loop_grey.png");
-    imageLoad(&loop_white, "romfs:/data/loop_white.png");
-    imageLoad(&shuffle_grey, "romfs:/data/shuffle_grey.png");
-    imageLoad(&shuffle_white, "romfs:/data/shuffle_white.png");
-    imageLoad(&skip_back, "romfs:/data/skip_back.png");
-    imageLoad(&skip_forward, "romfs:/data/skip_forward.png");
-    imageLoad(&rewind_icon, "romfs:/data/rewind_icon.png");
-    imageLoad(&musicNX, "romfs:/data/musicNX.jpg");
-    imageLoad(&vapor, "romfs:/data/vapor.jpg");
-    imageLoad(&empty_box_grey, "romfs:/data/empty_box_grey.png");
-    imageLoad(&tick_box, "romfs:/data/tick_box.png");
-    //imageLoad(&, "romfs:/data/.png");
-    return 0;
-}
-
-void destroyTexture()
-{
-    SDL_DestroyTexture(background);
-    SDL_DestroyTexture(black_background);
-    SDL_DestroyTexture(white_background);
-    SDL_DestroyTexture(ams_background);
-    SDL_DestroyTexture(kyon);
-    SDL_DestroyTexture(switch_logo);
-    SDL_DestroyTexture(right_arrow);
-    SDL_DestroyTexture(a_button);
-    SDL_DestroyTexture(b_button);
-    SDL_DestroyTexture(plus_button);
-    SDL_DestroyTexture(scrollbar);
-    SDL_DestroyTexture(ID3_tag);
-    SDL_DestroyTexture(grey_play_button);
-    SDL_DestroyTexture(white_play_button);
-    SDL_DestroyTexture(pause_grey);
-    SDL_DestroyTexture(play_grey);
-    SDL_DestroyTexture(play_white);
-    SDL_DestroyTexture(pause_white);
-    SDL_DestroyTexture(loop1_icon);
-    SDL_DestroyTexture(loop_grey);
-    SDL_DestroyTexture(loop_white);
-    SDL_DestroyTexture(shuffle_grey);
-    SDL_DestroyTexture(shuffle_white);
-    SDL_DestroyTexture(skip_back);
-    SDL_DestroyTexture(skip_forward);
-    SDL_DestroyTexture(rewind_icon);
-    SDL_DestroyTexture(musicNX);
-    SDL_DestroyTexture(vapor);
-    SDL_DestroyTexture(empty_box_grey);
-    SDL_DestroyTexture(tick_box);
-    //SDL_DestroyTexture();
-}
+}*/
 
 void mp3Tag()
 {
@@ -259,7 +166,6 @@ void playMus()
     Mix_PlayMusic(music, 0);
     { g_SongInSec = -1; g_SongInMin = 0; rewindValue = -1; }
     printf("\nNOW PLAYING... %s\n", g_MusList[j]);
-    //if (strcmp((strrchr(g_MusList[j], '.')+1), "mp3") == 0) mp3Tag(); I was so proud of this, then saw sdl has an api for checking the type...
 }
 
 void skipnext()
@@ -306,60 +212,41 @@ void touchSong(int menuTab, int x, int y)
             counter++;
         }
     }
-    /*while (menuTab == 0 && counter < g_MaxList && y < g_MusListMaxY && y >= 110 && x < g_MusListMaxX)
-    {
-        if (x >= 430 && y >= touchtest && y <= touchtest + touchExt)
-        {
-             = zero;
-            g_CursorList = zero;
-            g_CursorScroll = g_MusListX;
-            break;
-        }
-        else
-        {
-            touchtest += touchInc;
-            zero++;
-            counter++;
-        }
-    }*/
-    
 }
 
 void sideTabDisplay()
 {
     if (menuTab == 0)
     {
-        textDraw(fntMedium, 90, 280, colour, "Settings");
-        textDraw(fntMedium, 90, 380, colour, "Information");
-        imageDrawScale(right_arrow, 60, 190, 30, 30);
-        if (inTab == false) textDraw(fntMedium, 120, 180, colour, "Music Select");
-        else textDraw(fntMedium, 120, 180, highlight, "Music Select");
+        drawText(fntMedium, 90, 280, SDL_GetColour(white), "Settings");
+        drawText(fntMedium, 90, 380, SDL_GetColour(white), "Information");
+        drawImageScale(right_arrow, 60, 190, 30, 30);
+        if (inTab == false) drawText(fntMedium, 120, 180, SDL_GetColour(white), "Music Select");
+        else drawText(fntMedium, 120, 180, SDL_GetColour(grey), "Music Select");
     }
     else if (menuTab == 1)
     {
-        textDraw(fntMedium, 90, 180, colour, "Music Select");
-        textDraw(fntMedium, 90, 380, colour, "Information");
-        imageDrawScale(right_arrow, 60, 290, 30, 30);
-        if (inTab == false) textDraw(fntMedium, 120, 280, colour, "Settings");
-        else textDraw(fntMedium, 120, 280, highlight, "Settings");
+        drawText(fntMedium, 90, 180, SDL_GetColour(white), "Music Select");
+        drawText(fntMedium, 90, 380, SDL_GetColour(white), "Information");
+        drawImageScale(right_arrow, 60, 290, 30, 30);
+        if (inTab == false) drawText(fntMedium, 120, 280, SDL_GetColour(white), "Settings");
+        else drawText(fntMedium, 120, 280, SDL_GetColour(grey), "Settings");
     }
     else
     {
-        textDraw(fntMedium, 90, 180, colour, "Music Select");
-        textDraw(fntMedium, 90, 280, colour, "Settings");
-        imageDrawScale(right_arrow, 60, 390, 30, 30);
-        if (inTab == false) textDraw(fntMedium, 120, 380, colour, "Information");
-        else textDraw(fntMedium, 120, 380, highlight, "Information");
+        drawText(fntMedium, 90, 180, SDL_GetColour(white), "Music Select");
+        drawText(fntMedium, 90, 280, SDL_GetColour(white), "Settings");
+        drawImageScale(right_arrow, 60, 390, 30, 30);
+        if (inTab == false) drawText(fntMedium, 120, 380, SDL_GetColour(white), "Information");
+        else drawText(fntMedium, 120, 380, SDL_GetColour(grey), "Information");
     }
 }
 
-#define SCREEN_W 1920
-#define SCREEN_H 1080 //big mistake, shouldve kept it as 720p :(
 
 int main(int argc, char **argv)
 {
-    socketInitializeDefault(); //DEBUG
-    nxlinkStdio();
+    initApp();
+
     printf("Testing...\n\nTesting...\n\nCan you see me?........\n\n");
 
     if (randomizerInit() != 0) printf("ERROR: randomizer failed!\n");
@@ -381,26 +268,10 @@ int main(int argc, char **argv)
     }
     i--;
     closedir(dr);
-    //free(location);
 
-    if (initApp() != 0) printf("\nERROR: initApp failed!\n");
-
-    window = SDL_CreateWindow("totaljustice", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_W, SCREEN_H, SDL_WINDOW_SHOWN);
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-
-
-    fntTiny = TTF_OpenFont("romfs:/font/NintendoStandard.ttf", 28);
-    fntSmall = TTF_OpenFont("romfs:/font/NintendoStandard.ttf", 36);
-    fntMediumIsh = TTF_OpenFont("romfs:/font/NintendoStandard.ttf", 40);
-    fntMedium = TTF_OpenFont("romfs:/font/NintendoStandard.ttf", 48);
-    fntLarge = TTF_OpenFont("romfs:/font/NintendoStandard.ttf", 72);
-
-    if (loadTexture() != 0) printf("ERROR: Texture load failed!\n");
-
-    SDL_Colour allColour[] = { white, grey, black, pink, hotPink, orange, yellow, gold, brown, red, darkRed, green, limeGreen, aqua, teal, lightBlue, blue, darkBlue, purple, indigo, beige };
-    SDL_Texture *allThemes[] =  { black_background, white_background, ams_background, vapor };
-    background = allThemes[0];
-    colour = allColour[0], highlight = allColour[1];
+    SDL_Texture *allThemes[] =  { black_background, white_background };
+    //background = allThemes[0];
+    SDL_Colour colour = SDL_GetColour(white), highlight = SDL_GetColour(grey);
     char *allColourString[22] = {"white", "grey", "black", "pink", "hotPink", "orange", "yellow", "gold", "brown", "red", "darkRed", "green", "limeGreen", "aqua", "teal", "lightBlue", "blue", "darkBlue", "purple", "indigo", "beige", '\0'};
     char *menuTab1Options[] = {"Autoplay:", "Set Custom Music Path:", "Set Rewind / Fast Forward Value:", "Set Theme / Background:", "Set Text Colour:", "Set Highlight Colour:", "Experimental Settings:", "Reset All To default:"};
 
@@ -436,16 +307,15 @@ int main(int argc, char **argv)
 
 /*#####################################################################################################################################*/
 
-        SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, background, NULL, NULL);
+        clearRenderer();
 
-        if (id3v2Found == true) imageDrawScale(ID3_tag, 60, 515, 300, 300);
-        else imageDrawScale(musicNX, 60, 515, 300, 300);
+        if (id3v2Found == true) drawImageScale(ID3_tag, 60, 515, 300, 300);
+        else drawImageScale(musicNX, 60, 515, 300, 300);
 
-        if (Mix_PlayingMusic() && !Mix_PausedMusic()) imageDraw(pause_white, 280, 870);
-        else imageDraw(play_white, 290, 870);
-        imageDraw(skip_back, 60, 870);
-        imageDraw(skip_forward, 480, 870);
+        if (Mix_PlayingMusic() && !Mix_PausedMusic()) drawImage(pause_white, 280, 870);
+        else drawImage(play_white, 290, 870);
+        drawImage(skip_back, 60, 870);
+        drawImage(skip_forward, 480, 870);
 
         //Pause / play
         if (kdown & KEY_TOUCH && touch.px > 186 && touch.px < 256 && touch.py > 580 && touch.py < 640)
@@ -460,9 +330,9 @@ int main(int argc, char **argv)
         //skipforward
         if (kdown & KEY_TOUCH && touch.px > 320 && touch.px < 390 && touch.py > 580 && touch.py < 640) skipnext();
 
-        if (loopall == false && loop1 == false) imageDraw(loop_white, 380, 700);
-        else if (loopall == true) imageDraw(loop_grey, 380, 700);
-        else imageDraw(loop1_icon, 380, 700);
+        if (loopall == false && loop1 == false) drawImage(loop_white, 380, 700);
+        else if (loopall == true) drawImage(loop_grey, 380, 700);
+        else drawImage(loop1_icon, 380, 700);
 
         //loopall / loop1
         if (kdown & KEY_TOUCH && touch.px > 245 && touch.px < 340 && touch.py > 466 && touch.py < 530)
@@ -483,8 +353,8 @@ int main(int argc, char **argv)
             }
         }
 
-        if (shuffleMode == false) imageDraw(shuffle_white, 490, 700);
-        else imageDraw(shuffle_grey, 490, 700);
+        if (shuffleMode == false) drawImage(shuffle_white, 490, 700);
+        else drawImage(shuffle_grey, 490, 700);
 
         //shuffle on / off
         if (kdown & KEY_TOUCH && touch.px > 315 && touch.px < 410 && touch.py > 466 && touch.py < 530)
@@ -495,16 +365,16 @@ int main(int argc, char **argv)
             else shuffleMode = false;
         }
 
-        imageDrawScale(kyon, 60, 30, 160, 90);
-        imageDrawScale(b_button, 1450, 1000, 50, 50);
-        if (menuTab == 0) textDraw(fntSmall, 1510, 1010, colour, "Pause");
-        else textDraw(fntSmall, 1510, 1010, colour, "Back");
-        imageDrawScale(a_button, 1650, 1000, 50, 50);
-        textDraw(fntSmall, 1710, 1010, colour, "Select");
-        textDraw(fntMedium, scrollNowplay, g_MusListMaxX, colour, g_MusList[j]); //Now playing
+        drawImageScale(musicNX, 60, 30, 160, 90);
+        drawImageScale(b_button, 1450, 1000, 50, 50);
+        if (menuTab == 0) drawText(fntSmall, 1510, 1010, SDL_GetColour(white), "Pause");
+        else drawText(fntSmall, 1510, 1010, SDL_GetColour(white), "Back");
+        drawImageScale(a_button, 1650, 1000, 50, 50);
+        drawText(fntSmall, 1710, 1010, SDL_GetColour(white), "Select");
+        drawText(fntMedium, scrollNowplay, g_MusListMaxX, SDL_GetColour(white), g_MusList[j]); //Now playing
 
-        shapeDraw(brightGrey, 55, 840, 525, 15);
-        shapeDraw(neonPink, 55, 840, songProgressBar, 15);
+        drawShape(SDL_GetColour(grey), 55, 840, 525, 15);
+        drawShape(SDL_GetColour(neon_pink), 55, 840, songProgressBar, 15);
 
         sideTabDisplay(); // Displays the left side tab.
 
@@ -515,9 +385,9 @@ int main(int argc, char **argv)
                 if (g_CursorList == tempMove && inTab == false) // Checks what the selected song is, then changes the colour to highlight, and x becomes the scrolling variable.
                 {
                     g_IsScroll = true;
-                    textDraw(fntSmall, g_CursorScroll, g_MusListY, highlight, g_MusList[tempMove]);
+                    drawText(fntSmall, g_CursorScroll, g_MusListY, highlight, g_MusList[tempMove]);
                 }
-                else textDraw(fntSmall, g_MusListX, g_MusListY, colour, g_MusList[tempMove]);
+                else drawText(fntSmall, g_MusListX, g_MusListY, SDL_GetColour(white), g_MusList[tempMove]);
                 g_MusListY += 70;
             }
         }
@@ -526,27 +396,27 @@ int main(int argc, char **argv)
         {
             if (menuTab == 1 && settingsSubMenuCounter == 0)
             {
-                if (autoplay == true) imageDrawScale(tick_box, 880, 150, 60, 60);
-                else imageDrawScale(empty_box_grey, 880, 150, 60, 60);
+                if (autoplay == true) drawImageScale(tick_box, 880, 150, 60, 60);
+                else drawImageScale(empty_box_grey, 880, 150, 60, 60);
 
                 for (int temp = 0, tempMove = settingsListTemp; temp < settingsListMax; temp++, tempMove++)
                 {
-                    if (settingsCursorPosition == tempMove && inTab == false) textDraw(fntMediumIsh, g_MusListX, g_MusListY, highlight, menuTab1Options[tempMove]);
-                    else textDraw(fntMediumIsh, g_MusListX, g_MusListY, colour, menuTab1Options[tempMove]);
+                    if (settingsCursorPosition == tempMove && inTab == false) drawText(fntMediumIsh, g_MusListX, g_MusListY, highlight, menuTab1Options[tempMove]);
+                    else drawText(fntMediumIsh, g_MusListX, g_MusListY, SDL_GetColour(white), menuTab1Options[tempMove]);
                     g_MusListY += 100;
                 }
             }
             else if (settingsSubMenuCounter == 3)
             {
-                imageDrawScale(allThemes[0], 650, 150, 180, 135);
-                textDraw(fntMediumIsh, 900, 200, colour, "Black Theme");
-                imageDrawScale(allThemes[1], 650, 325, 180, 135);
-                textDraw(fntMediumIsh, 900, 375, colour, "White Theme");
-                imageDrawScale(allThemes[2], 650, 500, 180, 135);
-                textDraw(fntMediumIsh, 900, 550, colour, "Atmosphere Theme");
-                imageDrawScale(allThemes[3], 650, 675, 180, 135);
-                textDraw(fntMediumIsh, 900, 725, colour, "Vaporwave Theme");
-                textDraw(fntMedium, 650, 900, colour, "Load Custom Theme...");
+                drawImageScale(allThemes[0], 650, 150, 180, 135);
+                drawText(fntMediumIsh, 900, 200, SDL_GetColour(white), "Black Theme");
+                drawImageScale(allThemes[1], 650, 325, 180, 135);
+                drawText(fntMediumIsh, 900, 375, SDL_GetColour(white), "White Theme");
+                drawImageScale(allThemes[0], 650, 500, 180, 135);
+                drawText(fntMediumIsh, 900, 550, SDL_GetColour(white), "TEMP Theme");
+                drawImageScale(allThemes[1], 650, 675, 180, 135);
+                drawText(fntMediumIsh, 900, 725, SDL_GetColour(white), "TEMP Theme");
+                drawText(fntMedium, 650, 900, SDL_GetColour(white), "Load Custom Theme...");
             }
 
             else if (settingsSubMenuCounter == 4) //Text Colour Menu
@@ -555,10 +425,10 @@ int main(int argc, char **argv)
                 {
                     if (textColourCursourPosition == tempMove && inTab == false)
                     {
-                        imageDrawScale(right_arrow, 650, g_MusListY, 30, 30);
-                        textDraw(fntSmall, 700, g_MusListY, allColour[tempMove], allColourString[tempMove]);
+                        drawImageScale(right_arrow, 650, g_MusListY, 30, 30);
+                        drawText(fntSmall, 700, g_MusListY, SDL_GetColour(tempMove), allColourString[tempMove]);
                     }
-                    else textDraw(fntSmall, g_MusListX, g_MusListY, allColour[tempMove], allColourString[tempMove]);
+                    else drawText(fntSmall, g_MusListX, g_MusListY, SDL_GetColour(tempMove), allColourString[tempMove]);
                     g_MusListY += 70;
                 }
             }
@@ -569,10 +439,10 @@ int main(int argc, char **argv)
                 {
                     if (highlightCursourPosition == tempMove && inTab == false)
                     {
-                        imageDrawScale(right_arrow, 650, g_MusListY, 30, 30);
-                        textDraw(fntSmall, 700, g_MusListY, allColour[tempMove], allColourString[tempMove]);
+                        drawImageScale(right_arrow, 650, g_MusListY, 30, 30);
+                        drawText(fntSmall, 700, g_MusListY, SDL_GetColour(tempMove), allColourString[tempMove]);
                     }
-                    else textDraw(fntSmall, g_MusListX, g_MusListY, allColour[tempMove], allColourString[tempMove]);
+                    else drawText(fntSmall, g_MusListX, g_MusListY, SDL_GetColour(tempMove), allColourString[tempMove]);
                     g_MusListY += 70;
                 }
             }
@@ -580,24 +450,18 @@ int main(int argc, char **argv)
 
         if (menuTab == 2)
         {
-            textDraw(fntLarge, 650, 150, colour, "BETA:");
+            drawText(fntLarge, 650, 150, colour, "BETA:");
 
-            textDraw(fntMediumIsh, 650, 350, colour, "..................");
-            textDraw(fntMediumIsh, 650, 450, colour, "Oh hey!");
-            textDraw(fntMediumIsh, 650, 550, colour, "So.........");
-            textDraw(fntMediumIsh, 650, 650, colour, "What do you think?");
+            drawText(fntMediumIsh, 650, 350, colour, "..................");
+            drawText(fntMediumIsh, 650, 450, colour, "Oh hey!");
+            drawText(fntMediumIsh, 650, 550, colour, "So.........");
+            drawText(fntMediumIsh, 650, 650, colour, "What do you think?");
         }
-        SDL_RenderPresent(renderer);
+        updateRenderer();
         g_MusListY = 150;
         g_CursorScroll++;
 
 /*#####################################################################################################################################*/
-
-        if (kdown & KEY_X)
-        {
-            if (background == black_background) background = allThemes[3];
-            else background = allThemes[0];
-        }
 
         if (kheld & KEY_ZL) // Rewind function.
         {
@@ -1049,13 +913,13 @@ int main(int argc, char **argv)
 
                     case 4:
                         printf("tab 4\n");
-                        if (settingsSubMenuCounter == 4) colour = allColour[textColourCursourPosition];
+                        if (settingsSubMenuCounter == 4) colour = SDL_GetColour(textColourCursourPosition);
                         settingsSubMenuCounter = 4;
                         break;
 
                     case 5:
                         printf("tab 5\n");
-                        if (settingsSubMenuCounter == 5) highlight = allColour[highlightCursourPosition];
+                        if (settingsSubMenuCounter == 5) highlight = SDL_GetColour(highlightCursourPosition);
                         settingsSubMenuCounter = 5;
                         break;
 
@@ -1155,22 +1019,8 @@ int main(int argc, char **argv)
         }
     }
 
-    Mix_HaltChannel(-1);
-    Mix_FreeMusic(music);
-    Mix_CloseAudio();
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    destroyTexture();
-    SDL_Quit();
-    TTF_Quit();
-    IMG_Quit();
-    Mix_Quit();
-    romfsExit();
-    mpg123_exit();
+    appExit();
 
-    errorExit:
-    socketExit();
     for (i = 0; i <= 2500; i++) free(g_MusList[i]);
-    if (errorCode > 0) consoleExit(NULL);
     return 0;
 }

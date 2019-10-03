@@ -1,4 +1,6 @@
 /build*
-music.elf
-music.nacp
-music.nro
+/.vscode*
+*.elf
+*.nacp
+*.nro
+*.txt
