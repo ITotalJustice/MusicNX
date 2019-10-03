@@ -2,39 +2,33 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <time.h>
-#include <ctype.h>
 
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_mixer.h>
 
-#include <mpg123.h>
 #include <switch.h>
-#include <math.h>
 
 #include "sdl.h"
+#include "music.h"
+#include "util.h"
+#include "dir.h"
 
 
 bool g_IsScroll = false, id3v2Found = false, id3v2Enable = true, shuffleMode = false, secNeedsZero = false, displayMin = false, inTab = false;
-int i = 0, j = 0, g_CursorList = 0, g_MaxList = 12, songListMax = 11, g_MusListY = 150, g_MusListX = 650, g_MusListMaxY = 635, g_MusListMaxX = 1000, scrollNowplay = 60, \
+int number_of_files = 0, current_song = 0, g_CursorList = 0, g_MaxList = 12, songListMax = 11, g_MusListY = 150, g_MusListX = 650, g_MusListMaxY = 635, g_MusListMaxX = 1000, scrollNowplay = 60, \
     g_CursorScroll = 650, g_SongInSec = -1, g_SongInMin = 0, g_ListMoveTemp = 0, g_ListMove = 0, errorCode = 0, menuTab = 0;
 static double songSecTotal, songProgressBar = 0, songProgressBarIncrease = 0;
-static int min, sec;
 
 double rewindValue = -1;
-char *g_MusList[2500] = {'\0'}; //Around 10gb of 4MB .mp3 files. Size can be increased if needed, just set at this for now...
-static Mix_Music *music = NULL;
-
-static mpg123_handle *handle = NULL;
 
 int initApp()
 {
     Result rc;
 
+    #ifdef DEBUG
     if (R_FAILED(rc = socketInitializeDefault()))           // for curl / nxlink.
         printf("socketInitializeDefault() failed: 0x%x.\n\n", rc);
 
-    #ifdef DEBUG
     if (R_FAILED(rc = nxlinkStdio()))                       // redirect all printout to console window.
         printf("nxlinkStdio() failed: 0x%x.\n\n", rc)
     #endif
@@ -53,156 +47,38 @@ int initApp()
 
     sdlInit();                                              // int all of sdl and start loading textures.
 
-    mpg123_init();
+    musicInit();
+
     return 0;
 }
 
 void appExit()
 {
-    Mix_HaltChannel(-1);
-    Mix_FreeMusic(music);
-    Mix_CloseAudio();
-    Mix_Quit();
-    mpg123_exit();
-
-    romfsExit();
-    sdlExit();
+    #ifdef DEBUG
     socketExit();
+    #endif
+    romfsExit();
+    musicExit();
+    sdlExit();
     plExit();
     splExit();
     setsysExit();
 }
 
-int randomizerInit()
-{
-    struct timeval time; 
-    gettimeofday(&time, NULL);
-    srand((time.tv_sec * 1000) + (time.tv_usec / 1000));
-    return 0;
-}
-
-int randomizer(int low, int high)
-{
-    return rand() % (high - low + 1) + low;
-}
-
-/*void drawText(TTF_Font *font, int x, int y, SDL_Color colour, const char *text)
-{
-    SDL_Surface *Surface = TTF_RenderText_Blended_Wrapped(font, text, colour, 1920);
-    SDL_Texture *Tex = SDL_CreateTextureFromSurface(renderer, Surface);
-    SDL_Rect pos = { pos.x = x, pos.y = y, pos.w = Surface ->w, pos.h = Surface->h };
-
-    if (g_IsScroll == true && pos.w + x > 1750) { g_CursorScroll = 650; x = g_CursorScroll; }
-
-    SDL_RenderCopy(renderer, Tex, NULL, &pos);
-    SDL_DestroyTexture(Tex);
-    SDL_FreeSurface(Surface);
-    g_IsScroll = false;
-}*/
-
-void mp3Tag()
-{
-    mpg123_meta_free(handle);
-    handle = mpg123_new(NULL, NULL);
-    mpg123_param(handle, MPG123_ADD_FLAGS, MPG123_PICTURE, 0.0);
-    mpg123_open(handle, g_MusList[j]);
-    songSecTotal = mpg123_framelength(handle) * mpg123_tpf(handle);//, min = songSecTotal / 60, sec = songSecTotal % 60;
-    mpg123_id3v1 *v1 = NULL;
-	mpg123_id3v2 *v2 = NULL;
-    mpg123_seek(handle, 0, SEEK_CUR);
-    id3v2Found = false;
-
-    if (sec < 9) secNeedsZero = true;
-    else secNeedsZero = false;
-    printf("\ntotal song length is %f\n", songSecTotal);
-    if (secNeedsZero == true) printf("total song length in min/sec is %i:0%i\n", min, sec);
-    else printf("total song length in min/sec is %i:%i\n", min, sec);
-
-    songProgressBarIncrease = 525 / songSecTotal;
-    printf("\n\nsong prog is %f\n", songProgressBarIncrease);
-    
-    if (mpg123_meta_check(handle) & MPG123_ID3 && mpg123_id3(handle, &v1, &v2) == MPG123_OK)
-    {
-		if (v1 != NULL)
-        {
-            printf("meta 1\n");
-			//print_v1(&metadata, v1);
-        }
-		if (v2 != NULL && id3v2Enable == true)
-        {
-            printf("found idv2\n");
-            for (size_t count = 0; count < v2->pictures; count++)
-            {
-                mpg123_picture *pic = &v2->picture[count];
-                char *str = pic->mime_type.p;
-
-                if ((pic->type == 3 ) || (pic->type == 0))
-                {
-                    if ((!strcasecmp(str, "image/jpg")) || (!strcasecmp(str, "image/jpeg")) || (!strcasecmp(str, "image/png")))
-                    {
-                        id3v2Found = true;
-                        imageLoadMem(&ID3_tag, pic->data, pic->size);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
-void playMus()
-{
-    if (music != NULL)
-    {
-        Mix_HaltMusic();
-        Mix_FreeMusic(music);
-        music = NULL;
-        songProgressBar = 0;
-    }
-    if (shuffleMode == true) j = randomizer(0, i);
-    music = Mix_LoadMUS(g_MusList[j]);
-    if (Mix_GetMusicType(music) == 6) mp3Tag(); 
-    else id3v2Found = false;
-    Mix_PlayMusic(music, 0);
-    { g_SongInSec = -1; g_SongInMin = 0; rewindValue = -1; }
-    printf("\nNOW PLAYING... %s\n", g_MusList[j]);
-}
-
-void skipnext()
-{
-    printf("\nSKIPNEXT\n");
-    if (j + 1 <= i) j++;
-    else j = 0;
-    playMus();
-}
-
-void skipback()
-{
-    printf("\nSKIPBACK\n");
-    if (j - 1 >= 0) j--;
-    else j = i;
-    playMus();
-}
-
-void musRewind(double value)
-{
-    if (value > 0) Mix_SetMusicPosition(value);
-    else Mix_RewindMusic();
-}
-
-void touchSong(int menuTab, int x, int y)
+void touchSong(char **array, int current_song, int number_of_files, int menuTab, int x, int y)
 {
     int zero = g_ListMoveTemp, touchtest = 110, touchExt = 50, touchInc = 45, counter = 0;
+
     while(menuTab == 0 && counter < g_MaxList && y < g_MusListMaxY && y >= 110 && x < g_MusListMaxX)
     {
         if (x >= 430 && y >= touchtest && y <= touchtest + touchExt)
         {
-            printf("value of y = %i\n", y);
-            j = zero;
+            printf("value of y = %d\n", y);
+            current_song = zero;
             g_CursorList = zero;
             g_CursorScroll = g_MusListX;
             shuffleMode = false;
-            playMus();
+            current_song = playMus(array, current_song, number_of_files);
             break;
         }
         else
@@ -251,26 +127,28 @@ int main(int argc, char **argv)
 
     if (randomizerInit() != 0) printf("ERROR: randomizer failed!\n");
 
-    chdir("sdmc:/music/");
-	struct dirent *de;
-	DIR *dr = opendir("sdmc:/music/");
+    chdir(MUSIC_DIR);
+    char *files[500] = {'\0'};
+    int current_song = 0;
+    int number_of_files = 0;
 
-    while ((de = readdir(dr)) != NULL && i < 2500)
+	DIR *dr = opendir(MUSIC_DIR);
+    struct dirent *de;
+
+    for (int i = 0; (de = readdir(dr)); i++, number_of_files++)
     {
         if (strstr(de->d_name, ".mp3") != NULL || strstr(de->d_name, ".MP3") != NULL || strstr(de->d_name, ".ogg") != NULL || strstr(de->d_name, ".OGG") != NULL \
             || strstr(de->d_name, ".wav") != NULL || strstr(de->d_name, ".WAV") != NULL || strstr(de->d_name, ".MOD") != NULL || strstr(de->d_name, ".flac") != NULL)
         {
             size_t size = strlen(de->d_name) + 1;
-            g_MusList[i] = malloc (size);
-            strlcpy(g_MusList[i], de->d_name, size);
-            i++;
+            files[i] = malloc(size);
+            snprintf(files[i], size, "%s", de->d_name);
         }
     }
-    i--;
+    number_of_files--;
     closedir(dr);
 
     SDL_Texture *allThemes[] =  { black_background, white_background };
-    //background = allThemes[0];
     SDL_Colour colour = SDL_GetColour(white), highlight = SDL_GetColour(grey);
     char *allColourString[22] = {"white", "grey", "black", "pink", "hotPink", "orange", "yellow", "gold", "brown", "red", "darkRed", "green", "limeGreen", "aqua", "teal", "lightBlue", "blue", "darkBlue", "purple", "indigo", "beige", '\0'};
     char *menuTab1Options[] = {"Autoplay:", "Set Custom Music Path:", "Set Rewind / Fast Forward Value:", "Set Theme / Background:", "Set Text Colour:", "Set Highlight Colour:", "Experimental Settings:", "Reset All To default:"};
@@ -286,7 +164,7 @@ int main(int argc, char **argv)
 
     int themeSelect = 0;
 
-    if (autoplay == true) playMus();
+    if (autoplay == true) current_song = playMus(files, current_song, number_of_files);
 
     printf("\nEntering while loop!\n\n");
 
@@ -325,10 +203,12 @@ int main(int argc, char **argv)
         }
 
         //skipback
-        if (kdown & KEY_TOUCH && touch.px > 40 && touch.px < 110 && touch.py > 580 && touch.py < 640) skipback();
+        if (kdown & KEY_TOUCH && touch.px > 40 && touch.px < 110 && touch.py > 580 && touch.py < 640)
+            current_song = skipback(files, current_song, number_of_files);
 
         //skipforward
-        if (kdown & KEY_TOUCH && touch.px > 320 && touch.px < 390 && touch.py > 580 && touch.py < 640) skipnext();
+        if (kdown & KEY_TOUCH && touch.px > 320 && touch.px < 390 && touch.py > 580 && touch.py < 640)
+            current_song = skipnext(files, current_song, number_of_files);
 
         if (loopall == false && loop1 == false) drawImage(loop_white, 380, 700);
         else if (loopall == true) drawImage(loop_grey, 380, 700);
@@ -371,7 +251,7 @@ int main(int argc, char **argv)
         else drawText(fntSmall, 1510, 1010, SDL_GetColour(white), "Back");
         drawImageScale(a_button, 1650, 1000, 50, 50);
         drawText(fntSmall, 1710, 1010, SDL_GetColour(white), "Select");
-        drawText(fntMedium, scrollNowplay, g_MusListMaxX, SDL_GetColour(white), g_MusList[j]); //Now playing
+        drawText(fntMedium, scrollNowplay, g_MusListMaxX, SDL_GetColour(white), files[current_song]); //Now playing
 
         drawShape(SDL_GetColour(grey), 55, 840, 525, 15);
         drawShape(SDL_GetColour(neon_pink), 55, 840, songProgressBar, 15);
@@ -385,9 +265,9 @@ int main(int argc, char **argv)
                 if (g_CursorList == tempMove && inTab == false) // Checks what the selected song is, then changes the colour to highlight, and x becomes the scrolling variable.
                 {
                     g_IsScroll = true;
-                    drawText(fntSmall, g_CursorScroll, g_MusListY, highlight, g_MusList[tempMove]);
+                    drawText(fntSmall, g_CursorScroll, g_MusListY, highlight, files[tempMove]);
                 }
-                else drawText(fntSmall, g_MusListX, g_MusListY, SDL_GetColour(white), g_MusList[tempMove]);
+                else drawText(fntSmall, g_MusListX, g_MusListY, SDL_GetColour(white), files[tempMove]);
                 g_MusListY += 70;
             }
         }
@@ -495,7 +375,8 @@ int main(int argc, char **argv)
                 fpsCounter = 0;
                 songProgressBar += songProgressBarIncrease;
                 if (rewindValue + 1 <= songSecTotal) rewindValue++;
-                else skipnext();
+                else current_song = skipnext(files, current_song, number_of_files);
+
                 if (g_SongInSec + 1 <= 59) g_SongInSec++;
                 else
                 {
@@ -520,7 +401,7 @@ int main(int argc, char **argv)
                     g_SongInSec = 0;
                     g_SongInMin++;
                 }
-                printf("time is %i:%i\n", g_SongInMin, g_SongInSec);
+                printf("time is %d:%d\n", g_SongInMin, g_SongInSec);
             }
         }
 
@@ -532,7 +413,7 @@ int main(int argc, char **argv)
             {
                 inTab = false;
                 touchCheck = 0;
-                touchSong(menuTab, touchTempx, touchTempY);
+                touchSong(files, current_song, number_of_files, menuTab, touchTempx, touchTempY);
             }
             else if (kheld & KEY_TOUCH) printf("you touchheld!!\n");
         }
@@ -563,17 +444,17 @@ int main(int argc, char **argv)
             scrollListSpeedIncrease = scrollListSpeedDefault;
             if (menuTab == 0)
             {
-                if (g_CursorList + 1 > i)
+                if (g_CursorList + 1 > number_of_files)
                 {
                     g_CursorList = 0;
                     g_ListMoveTemp = 0;
-                    printf("loop to the top g_CursorList = %i = %s\n", g_CursorList, g_MusList[g_CursorList]);
+                    printf("loop to the top g_CursorList = %d = %s\n", g_CursorList, files[g_CursorList]);
                 }
                 else
                 {
                     g_CursorList++;
                     if (g_ListMoveTemp + g_MaxList == g_CursorList) g_ListMoveTemp++;
-                    printf("move down g_CursorList = %i = %s\n", g_CursorList, g_MusList[g_CursorList]);
+                    printf("move down g_CursorList = %d = %s\n", g_CursorList, files[g_CursorList]);
                 }
             }
             else if (menuTab == 1)
@@ -640,16 +521,16 @@ int main(int argc, char **argv)
             {
                 if (g_CursorList - 1 < 0)
                 {
-                    g_CursorList = i;
-                    if (i - songListMax < 0) g_ListMoveTemp = 0;
-                    else g_ListMoveTemp = i - songListMax;
-                    printf("loop to the bottom g_CursorList = %i = %s\n", g_CursorList, g_MusList[g_CursorList]);
+                    g_CursorList = number_of_files;
+                    if (number_of_files - songListMax < 0) g_ListMoveTemp = 0;
+                    else g_ListMoveTemp = number_of_files - songListMax;
+                    printf("loop to the bottom g_CursorList = %d = %s\n", g_CursorList, files[g_CursorList]);
                 }
                 else
                 {
                     g_CursorList--;
                     if (g_ListMoveTemp - 1 == g_CursorList) g_ListMoveTemp--;
-                    printf("move up g_CursorList = %i = %s\n", g_CursorList, g_MusList[g_CursorList]);
+                    printf("move up g_CursorList = %d = %s\n", g_CursorList, files[g_CursorList]);
                 }
             }
             else if (menuTab == 1)
@@ -720,17 +601,17 @@ int main(int argc, char **argv)
                 scrollListSpeedIncrease++;
                 if (menuTab == 0)
                 {
-                    if (g_CursorList + 1 > i)
+                    if (g_CursorList + 1 > number_of_files)
                     {
                         g_CursorList = 0;
                         g_ListMoveTemp = 0;
-                        printf("loop to the top g_CursorList = %i = %s\n", g_CursorList, g_MusList[g_CursorList]);
+                        printf("loop to the top g_CursorList = %d = %s\n", g_CursorList, files[g_CursorList]);
                     }
                     else
                     {
                         g_CursorList++;
                         if (g_ListMoveTemp + g_MaxList == g_CursorList) g_ListMoveTemp++;
-                        printf("move down g_CursorList = %i = %s\n", g_CursorList, g_MusList[g_CursorList]);
+                        printf("move down g_CursorList = %d = %s\n", g_CursorList, files[g_CursorList]);
                     }
                 }
                 else if (menuTab == 1) ////////////HEERE
@@ -790,16 +671,16 @@ int main(int argc, char **argv)
                 {
                     if (g_CursorList - 1 < 0)
                     {
-                        g_CursorList = i;
-                        if (i - songListMax < 0) g_ListMoveTemp = 0;
-                        else g_ListMoveTemp = i - songListMax;
-                        printf("loop to the bottom g_CursorList = %i = %s\n", g_CursorList, g_MusList[g_CursorList]);
+                        g_CursorList = number_of_files;
+                        if (number_of_files - songListMax < 0) g_ListMoveTemp = 0;
+                        else g_ListMoveTemp = number_of_files - songListMax;
+                        printf("loop to the bottom g_CursorList = %d = %s\n", g_CursorList, files[g_CursorList]);
                     }
                     else
                     {
                         g_CursorList--;
                         if (g_ListMoveTemp - 1 == g_CursorList) g_ListMoveTemp--;
-                        printf("move up g_CursorList = %i = %s\n", g_CursorList, g_MusList[g_CursorList]);
+                        printf("move up g_CursorList = %d = %s\n", g_CursorList, files[g_CursorList]);
                     }
                 }
                 else if (menuTab == 1)
@@ -879,9 +760,9 @@ int main(int argc, char **argv)
         {
             if (inTab == false && menuTab == 0)
             {
-                j = g_CursorList;
+                current_song = g_CursorList;
                 Mix_ResumeMusic();
-                playMus();
+                current_song = playMus(files, current_song, number_of_files);
             }
             else if (inTab == false && menuTab == 1)
             {
@@ -949,26 +830,26 @@ int main(int argc, char **argv)
         
         if (!Mix_PlayingMusic() && !Mix_PausedMusic() && (loop1 == true || autoplay == true)) // Checks if song is playing, if not, the code inside is then executed / checked.
         {
-            if (loop1 == true) playMus();
+            if (loop1 == true) current_song = playMus(files, current_song, number_of_files);
             else if (autoplay == true)
             {
-                if (shuffleMode == true) playMus();
-                else if (j + 1 <= i)
+                if (shuffleMode == true) current_song = playMus(files, current_song, number_of_files);
+                else if (current_song + 1 <= number_of_files)
                 {
-                    j++;
-                    playMus();
+                    current_song++;
+                    current_song = playMus(files, current_song, number_of_files);
                 }
                 else if (loopall == true) // Loops back to the first song
                 {
-                    j = 0;
-                    playMus();
+                    current_song = 0;
+                    current_song = playMus(files, current_song, number_of_files);
                 }
             }
         }
 
         if (kdown & KEY_PLUS || kdown & KEY_MINUS) break;
-        if (kdown & KEY_R) skipnext();
-        if (kdown & KEY_L) skipback();
+        if (kdown & KEY_R) current_song = skipnext(files, current_song, number_of_files);
+        if (kdown & KEY_L) current_song = skipback(files, current_song, number_of_files);
 
         if (kdown & KEY_Y) // Changes the playmode
         {
@@ -1021,6 +902,9 @@ int main(int argc, char **argv)
 
     appExit();
 
-    for (i = 0; i <= 2500; i++) free(g_MusList[i]);
+    for (int i = 0; i < number_of_files; i++)
+    {
+        free(files[i]);
+    }
     return 0;
 }

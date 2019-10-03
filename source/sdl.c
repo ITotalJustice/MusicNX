@@ -3,13 +3,10 @@
 /* If you decide to use this header and add functions, please consider opening a pr for said functions */
 /* I would greatly appreaciate it :) */
 
-#include <SDL2/SDL_mixer.h>
 #include <SDL2/SDL_image.h>
 #include <switch.h>
 
 #include "sdl.h"
-
-#define sdl_default_bitrate 48000
 
 static SDL_Window *main_window;
 static SDL_Renderer *main_renderer;
@@ -208,9 +205,6 @@ void sdlInit()
     TTF_Init();
     SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO);
     IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
-    Mix_Init(MIX_INIT_MOD | MIX_INIT_MP3 | MIX_INIT_OGG | MIX_INIT_FLAC);
-    Mix_OpenAudio(sdl_default_bitrate, AUDIO_S32LSB, 2, 1024);
-    Mix_VolumeMusic(64); //TODO: volume slider
 
     main_window = SDL_CreateWindow("totaljustice", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_W, SCREEN_H, SDL_WINDOW_SHOWN);
     main_renderer = SDL_CreateRenderer(main_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
